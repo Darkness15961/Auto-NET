@@ -23,10 +23,7 @@ El objetivo de **Auto Net** es simplificar y automatizar los procesos técnicos 
 Para ejecutar **Auto Net**, se necesitan los siguientes paquetes en el sistema Linux:
 
 - `isc-dhcp-server`
-- `iptables`
-- `dnsmasq`
-- `iproute2`
-- `net-tools`
+- `iptables-persisten`
 
 ## Instalación
 
