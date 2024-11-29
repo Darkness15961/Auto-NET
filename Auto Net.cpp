@@ -5,31 +5,36 @@
 #include <cstdio>
 #include <regex>
 #include <fstream>
-#include <filesystem>
 #include <sstream>
+#include <filesystem>
+
 namespace fs = std::filesystem;
 using namespace std;
 
 // Variable global para guardar la interfaz seleccionada para enrutamiento
 string interfazWan = "";
-string interfazLan = "";  // Para guardar la interfaz seleccionada
-string direccionIPlan = "";           // Para guardar la dirección IP
-string mascara = "";               // Para guardar la máscara de red
-string ipInicio;  // IP de inicio por defecto
-string ipFinal;   // IP final por defecto
-string identidadRed; // Red local, se ajusta automáticamente
-string dns = "1.1.1.1";             // DNS por defecto
-string mascara_completa;  // Mascara completa (ejemplo: 255.255.255.0)
-bool ipServer=false;
-string direccionNat = ""; // Dirección IP de la interfaz WAN
-string mascaraNat = ""; // Máscara de la interfaz WAN
-// Lista de paquetes necesarios
-    vector<string> packages = {
-        "isc-dhcp-server",
-        "iptables",
-        "dnsmasq",
-        "iproute2"
-    };
+string direccionIPwan= "";
+string mascaraCIDRwan = "";
+
+string interfazLan = "";  
+string direccionIPlan = "";
+string mascaraCIDRlan = "";
+
+string ipInicio;  // IP de inicio DHCP
+string ipFinal;   // IP final DHCP
+string identidadRedLan; // Red local, se ajusta automáticamente
+string dnsLan = "1.1.1.1"; // DNS por defecto
+string mascaraDecimalLan;  // Mascara completa ejemplo: 255.255.255.0
+bool configuracionInterfaces=false; //Valida si las interfaces de red han sido configuradas
+bool paquetesInstalados = false; 
+
+// Lista de paquetes
+vector<string> packages = {
+    "isc-dhcp-server",
+    "iptables-persistent"
+};
+
+//Muestra las interfaces de red y configuraciones
 void obtenerInterfacesRed() {
     // Ejecuta el comando 'ip a' usando popen
     FILE *fp = popen("ip a", "r");
@@ -38,7 +43,7 @@ void obtenerInterfacesRed() {
         return;
     }
 
-    char linea[1024]; // Buffer para almacenar cada línea
+    char linea[1024]; 
     vector<string> interfaces; // Para almacenar la salida completa de cada interfaz
     string interfazActual;
     
@@ -58,13 +63,10 @@ void obtenerInterfacesRed() {
             interfazActual += strLinea; // Añade la línea a la interfaz actual
         }
     }
-
-    // Asegúrate de agregar la última interfaz al vector
     if (!interfazActual.empty()) {
         interfaces.push_back(interfazActual);
     }
-
-    // Ahora imprime las interfaces de forma más ordenada y simple
+    // Mostrar las interfaces
     for (size_t i = 0; i < interfaces.size(); ++i) {
         string interfaz = interfaces[i];
         string nombreInterfaz;
@@ -114,8 +116,6 @@ void obtenerInterfacesRed() {
         }
         cout << "-----------------------------" << endl;
     }
-
-    // Cierra el archivo después de terminar
     fclose(fp);
 }
 // Función para buscar un archivo con extensión .yaml en el directorio /etc/netplan/
@@ -133,7 +133,7 @@ string buscarArchivoNetplan() {
 
     return archivoNetplan;
 }
-// Función para manejar el submenú de interfaces de red
+    // Función para manejar el submenú de interfaces de red
 void submenuInterfaces() {
     int opcion;
     string comando;
@@ -142,39 +142,34 @@ void submenuInterfaces() {
         //system("clear");
         obtenerInterfacesRed();
         cout << "\nSubmenú de Interfaces de Red:\n";
-        cout << "1) Seleccionar interfaz de red para enrutamiento y DHCP\n";
+        cout << "1) Interfaz de red para enrutamiento y DHCP\n";
         cout << "2) Volver\n";
         cout << "Selecciona una opción: ";
         cin >> opcion;
 
         switch (opcion) {
             case 1:{
-                // Seleccionar interfaz de red
-                cout << "Introduce el nombre de la interfaz NAT: ";
+                cout << "Nombre de la interfaz WAN: ";
                 cin >> interfazWan;
-                cout << "Interfaz NAT seleccionada: " << interfazWan << endl;
 
-                // Dirección IP para la interfaz WAN
-                cout << "Ingresa la dirección IP de la interfaz NAT (dhcp o dirección IP): ";
-                cin >> direccionNat;
+                cout << "Dirección IP de la interfaz WAN(dhcp o ip): ";
+                cin >> direccionIPwan;
 
-                if (direccionNat != "dhcp") {
-                    cout << "Introduce la máscara de red para la interfaz NAT: ";
-                    cin >> mascaraNat;
+                if (direccionIPwan != "dhcp") {
+                    cout << "Máscara de red CIRD WAN: ";
+                    cin >> mascaraCIDRwan;
                 }
 
-                cout << "Introduce el nombre de la interfaz de red interna (LAN): ";
+                cout << "Nombre de la interfaz LAN: ";
                 cin >> interfazLan;
 
-                cout << "Interfaz LAN seleccionada: " << interfazLan << endl;
-
-                // Solicitar la dirección IP y la máscara para la interfaz LAN
-                cout << "Introduce la dirección IP para la interfaz LAN: ";
+                cout << "Dirección IP LAN: ";
                 cin >> direccionIPlan;
-                cout << "Introduce la máscara de red para la interfaz LAN: ";
-                cin >> mascara;
 
-                // Configuración permanente de IP en Netplan
+                cout << "Máscara de red CIRD: ";
+                cin >> mascaraCIDRlan;
+
+                // Configuracion Netplan
                 string netplanFile = buscarArchivoNetplan();
 
                 ofstream file(netplanFile);
@@ -185,33 +180,38 @@ void submenuInterfaces() {
 
                     // Configurar la interfaz WAN
                     file << "    " << interfazWan << ":\n";
-                    if (direccionNat == "dhcp") {
+                    if (direccionIPwan == "dhcp") {
                         file << "      dhcp4: true\n";
                     } else {
-                        file << "      dhcp4: false\n";
+                        file << "      dhcp4: no\n";
                         file << "      addresses:\n";
-                        file << "        - " << direccionNat << "/" << mascaraNat << "\n";
+                        file << "        - " << direccionIPwan << "/" << mascaraCIDRwan << "\n";
                     }
 
                     // Configurar la interfaz LAN
                     file << "    " << interfazLan << ":\n";
-                    file << "      dhcp4: false\n";
+                    file << "      dhcp4: no\n";
                     file << "      addresses:\n";
-                    file << "        - " << direccionIPlan << "/" << mascara << "\n";
-                    
+                    file << "        - " << direccionIPlan << "/" << mascaraCIDRlan << "\n";
                     file.close();
 
                     // Aplicar los cambios de Netplan
-                    system("sudo netplan apply");
-
-                    cout << "La configuración IP se ha realizado de manera permanente.\n";
+                    system("clear");
+                    if (system("sudo netplan apply") == 0) {
+                        cout << "Configuración aplicada.\n";
+                        configuracionInterfaces = true;
+                    } else {
+                        cerr << "Error al aplicar configuración de Netplan.\n";
+                    }
                 } else {
                     cout << "Error al abrir el archivo de configuración de Netplan.\n";
-                } }
+                }
+                 }
                 break;
 
             case 2:
                 // Volver al menú principal
+                system("clear");
                 return;
 
             default:
@@ -221,52 +221,60 @@ void submenuInterfaces() {
     }
 }
 
+//                                                                               GESTION DE PAQUETES 
 
-
-// Función que verifica si un paquete está instalado
+// Verifica si un paquete está instalado
 bool is_package_installed(const string& package) {
     string command = "dpkg -l | grep -w " + package + " > /dev/null 2>&1";
     return system(command.c_str()) == 0;
 }
 
-// Función para instalar todos los paquetes necesarios
-void install_all_packages() {
-    cout << "Instalando todos los paquetes necesarios...\n";
-    string command = "sudo apt update && sudo apt install -y isc-dhcp-server iptables dnsmasq net-tools iproute2";
-    system(command.c_str());
-    cout << "Paquetes instalados correctamente.\n";
-}
-void subMenu_Programas(){
-    cout << "Verificador e instalador de paquetes\n";
-    cout << "-----------------------------------------\n";
+void verificar_paquetes(const vector<string>& packages) {
+    bool todos_instalados = true; // Variable local para verificar si todos están instalados
 
-    // Verificación de instalación de cada paquete
-    vector<string> package_status;
     for (const string& package : packages) {
         if (is_package_installed(package)) {
-            package_status.push_back(package + " [INSTALADO]");
+            cout << "- " << package << " [INSTALADO]" << endl;
         } else {
-            package_status.push_back(package + " [NO INSTALADO]");
+            cout << "- " << package << " [NO INSTALADO]" << endl;
+            todos_instalados = false; // Si algún paquete no está instalado, cambiamos a false
         }
     }
-
-    // Mostrar lista de paquetes con estado
-    for (size_t i = 0; i < package_status.size(); ++i) {
-        cout << "- " << package_status[i] << endl;
+    paquetesInstalados = todos_instalados;
+}
+// Instalar todos los paquetes necesarios
+void instalar_paquetes(const vector<string>& packages) {
+    cout << "Instalando todos los paquetes...\n";
+    string command = "sudo apt update && sudo apt install -y";
+    for (const auto& pkg : packages) {
+        command += " " + pkg;
     }
 
+    // Ejecutar el comando
+    int result = system(command.c_str());
+    system("clear");
+    if (result == 0) {
+        cout << "Paquetes instalados correctamente.\n";
+    } else {
+        cerr << "Error al instalar los paquetes.\n";
+    }
+}
+void subMenu_Programas(){
     int op;
     do {
+        cout << "--------Gestion de paquetes--------\n";
+        // Verificación de instalación de cada paquete
+        verificar_paquetes(packages);
         cout << "1. Instalar todos los paquetes\n";
         cout << "2. Salir\n";
         cout << "Opción: ";
         cin >> op;
-
         switch (op) {
             case 1:
-                install_all_packages();
+                instalar_paquetes(packages);
                 break;
             case 2:
+                system("clear");
                 return;
             default:
                 cout << "Opción no válida. Intenta nuevamente.\n";
@@ -275,13 +283,13 @@ void subMenu_Programas(){
     } while (op != 2);
 }
 
-//                                                             MENU ENRUTAMIENTO
-void configurarEnrutamiento() {
-    // Paso 1: Cargar el módulo iptable_nat si no está activo
+//                                                                            ENRUTAMIENTO
+void configurarEnrutamiento(){
+    //Cargar el módulo iptable_nat
     cout << "Cargando el módulo iptable_nat..." << endl;
     system("sudo modprobe iptable_nat");
 
-    // Paso 2: Activar el reenvío de paquetes IP
+    //Activar el reenvío de paquetes IP
     cout << "Habilitando el reenvío de paquetes IP..." << endl;
     // Editar /etc/sysctl.conf para habilitar el reenvío
     system("sudo sed -i '/#net.ipv4.ip_forward=1iptables/d' /etc/sysctl.conf");
@@ -290,13 +298,13 @@ void configurarEnrutamiento() {
     // Aplicar el cambio
     system("sudo sysctl -p");
 
-    // Paso 3: Definir reglas de iptables para el enrutamiento y NAT
+    //Definir reglas de iptables para el enrutamiento y NAT
     cout << "Configurando reglas de iptables..." << endl;
     system(("sudo iptables -A FORWARD -i " + interfazLan + " -o " + interfazWan + " -j ACCEPT").c_str());
     system(("sudo iptables -A FORWARD -i " + interfazWan + " -o " + interfazLan + " -j ACCEPT").c_str());
     system(("sudo iptables -t nat -A POSTROUTING -o " + interfazWan + " -j MASQUERADE").c_str());
 
-    // Paso 4: Verificar el reenvío de paquetes
+    //Verificar el reenvío de paquetes
     cout << "Verificando el reenvío de paquetes..." << endl;
     string resultado;
     FILE* fp = popen("cat /proc/sys/net/ipv4/ip_forward", "r");
@@ -316,16 +324,46 @@ void configurarEnrutamiento() {
         cout << "El reenvío de paquetes no está habilitado. Por favor, revisa la configuración." << endl;
     }
 
-    // Paso 5: Guardar las reglas de iptables para que persistan después del reinicio
+    //Guardar las reglas de iptables para que persistan después del reinicio
     cout << "Guardando las reglas de iptables..." << endl;
-    system("sudo apt install -y iptables-persistent");
+    
     system("sudo netfilter-persistent save");
     system("sudo netfilter-persistent reload");
 
     cout << "Enrutamiento NAT configurado correctamente." << endl;
-    return;
 }
+void submenuEnrutamiento() {
+    if(!configuracionInterfaces){
+        system("clear");
+        cout << "Se deben configurar las interfaces de red \n";
+        cout << "Para iniciar el enrutamiento \n";
+        return;
+    }
+    int op;
+    system("clear");
+    do {
+        cout << "---------Interfaces de enrutamiento----------" << endl;
+        cout << "Interfaz WAN: " << interfazWan << endl;
+        cout << "interfaz LAN: " << interfazLan << endl;
+        cout << "---------------------------------------------" <<endl;
+        cout << "1. Iniciar enrutamiento\n";
+        cout << "2. Volver\n";
+        cout << "Opción: ";
+        cin >> op;
+        switch (op) {
+            case 1:
+                configurarEnrutamiento();
+                break;
+            case 2:
+            system("clear");
+                return;
+            default:
+                cout << "Opción no válida. Intenta nuevamente.\n";
+            break;
+        }
+    } while (op != 2);
 
+}
 
 //                                                         PARTE DEL MENU DHCP
 // Función para convertir una dirección IP de cadena a un número
@@ -347,25 +385,25 @@ string numToIp(unsigned int num) {
     return ss.str();
 }
 
-// Función para calcular la máscara completa desde el formato CIDR (ej. /24)
+// Función para calcular la máscara completa desde el formato CIDR
 void calcularMascaraCompleta() {
-    int cidr = stoi(mascara);
+    int cidr = stoi(mascaraCIDRlan);
     unsigned int mask = (0xFFFFFFFF << (32 - cidr)) & 0xFFFFFFFF;
-    mascara_completa = numToIp(mask);
+    mascaraDecimalLan = numToIp(mask);
 }
 
-// Función para calcular la red (por ejemplo, 192.168.1.0)
+// Función para calcular la identidad de red (por ejemplo, 192.168.1.0)
 void calcularIdentidadRed() {
     unsigned int ipNum = ipToNum(direccionIPlan);
-    unsigned int maskNum = ipToNum(mascara_completa);
+    unsigned int maskNum = ipToNum(mascaraDecimalLan);
     unsigned int redNum = ipNum & maskNum;
-    identidadRed = numToIp(redNum);
+    identidadRedLan = numToIp(redNum);
 }
 
-// Función para calcular el rango de direcciones IP
+// Función para calcular el rango de direcciones IP DHCP
 void calcularRangoIps() {
-    unsigned int redNum = ipToNum(identidadRed);
-    unsigned int maskNum = ipToNum(mascara_completa);
+    unsigned int redNum = ipToNum(identidadRedLan);
+    unsigned int maskNum = ipToNum(mascaraDecimalLan);
     unsigned int broadcastNum = redNum | (~maskNum);  // Dirección de broadcast
 
     // La IP inicial será red + 1
@@ -374,30 +412,32 @@ void calcularRangoIps() {
     ipFinal = numToIp(broadcastNum - 1);
 }
 
-// Función para editar el archivo /etc/default/isc-dhcp-server
-void editarArchivoInterfaces() {
-    ofstream file("/etc/default/isc-dhcp-server");
-    if (file.is_open()) {
-        file << "INTERFACESv4=\"" << interfazLan << "\"" << endl;
-        file.close();
-    } else {
-        cerr << "No se pudo abrir el archivo /etc/default/isc-dhcp-server." << endl;
-    }
+// Función para iniciar el servicio DHCP
+void iniciarServicioDhcp() {
+    system("sudo systemctl start isc-dhcp-server");
+    system("sudo systemctl enable isc-dhcp-server");
+    system("clear");
+    cout << "El servicio DHCP ha sido iniciado y habilitado." << endl;
+    cout << "-----------------------------------------------" << endl;
 }
 
 // Función para editar el archivo /etc/dhcp/dhcpd.conf
 void editarArchivoDhcpdConf() {
     string archivo = "/etc/dhcp/dhcpd.conf";
     ifstream file_in(archivo);
+    if (!file_in.is_open()) {
+        cerr << "Error: No se pudo abrir /etc/dhcp/dhcpd.conf para lectura.\n";
+        return;
+    }
     string line;
     stringstream buffer;
     bool encontrado = false;
 
-    // Leemos el archivo completo
+    // Leer el archivo completo
     while (getline(file_in, line)) {
-        if (line.find("subnet " + identidadRed) != string::npos) {
+        if (line.find("subnet " + identidadRedLan) != string::npos) {
             encontrado = true;
-            continue;  // Omitimos el bloque existente de configuración de subnet
+            continue; 
         }
         buffer << line << endl;
     }
@@ -405,39 +445,62 @@ void editarArchivoDhcpdConf() {
 
     // Reemplazamos o agregamos la configuración
     if (!encontrado) {
-        buffer << "\nsubnet " << identidadRed << " netmask " << mascara_completa << " {\n";
+        buffer << "\nsubnet " << identidadRedLan << " netmask " << mascaraDecimalLan << " {\n";
         buffer << "    range " << ipInicio << " " << ipFinal << ";\n";
         buffer << "    option routers " << direccionIPlan << ";\n";
-        buffer << "    option domain-name-servers " << dns << ";\n";
+        buffer << "    option domain-name-servers " << dnsLan << ";\n";
         buffer << "    default-lease-time 600;\n";
         buffer << "    max-lease-time 7200;\n";
         buffer << "}\n";
     }
 
-    // Guardamos los cambios
+    // Guardar los cambios
     ofstream file_out(archivo);
     file_out << buffer.str();
     file_out.close();
+    iniciarServicioDhcp();
+}
+// Función para editar el archivo /etc/default/isc-dhcp-server
+void editarArchivoInterfaces() {
+    ofstream file("/etc/default/isc-dhcp-server");
+    if (file.is_open()) {
+        file << "INTERFACESv4=\"" << interfazLan << "\"" << endl;
+        file.close();
+        editarArchivoDhcpdConf();
+    } else {
+        cerr << "No se pudo abrir el archivo /etc/default/isc-dhcp-server." << endl;
+    }
 }
 
-// Función para iniciar el servicio DHCP
-void iniciarServicioDhcp() {
-    system("sudo systemctl start isc-dhcp-server");
-    system("sudo systemctl enable isc-dhcp-server");
-    cout << "El servicio DHCP ha sido iniciado y habilitado." << endl;
-}
 
-// Menú principal
-void menuDHCP() {
+//                                                                                    Menú dhcp
+void submenuDHCP() {
+    system("clear");
+    verificar_paquetes(packages);
+    system("clear");
+    if(!configuracionInterfaces){       
+        cout << "Se deben configurar las interfaces de red \n";
+        cout << "Para iniciar el servicio DHCP \n";
+        return;
+    }
+    if(!paquetesInstalados){
+        cout << "Se deben instalar los paquetes necesarios\n";
+        cout << "Revise la gestion de paquetes.\n";
+        cout << "-------------------------------------------\n";
+        return;
+    }
+    // Calcular valores iniciales
+    calcularMascaraCompleta();
+    calcularIdentidadRed();
     calcularRangoIps();
     while (true) {
-        cout << "\n--- Menú Principal ---" << endl;
-        cout << "Rango de IP mínimo: " << ipInicio << endl;
-        cout << "Rango de IP máximo: " << ipFinal << endl;
-        cout << "1) Asignar rango de direcciones IP" << endl;
-        cout << "2) Configurar DNS" << endl;
+        cout << "\n------- Configuracion DHCP -------" << endl;
+        cout << "IP de Inicio: " << ipInicio << endl;
+        cout << "IP final: " << ipFinal << endl;
+        cout << "1) Cambiar rango de direcciones IP" << endl;
+        cout << "2) Configurar DNS (por defecto 1.1.1.1)" << endl;
         cout << "3) Configurar Servidor DHCP" << endl;
-        cout << "4) Salir" << endl;
+        cout << "4) Volver" << endl;
 
         int opcion;
         cout << "Seleccione una opción: ";
@@ -453,35 +516,33 @@ void menuDHCP() {
                 break;
             }
             case 2: {
-                cout << "Ingrese la dirección DNS (por defecto 1.1.1.1): ";
-                cin >> dns;
-                if (dns.empty()) {
-                    dns = "1.1.1.1";
+                cout << "Dirección DNS (por defecto 1.1.1.1): ";
+                cin >> dnsLan;
+                if (dnsLan.empty()) {
+                    dnsLan = "1.1.1.1";
                 }
                 break;
             }
             case 3: {
-                // Calcular el rango de IPs
-                calcularRangoIps();
                 // Mostrar configuración
+                system("clear");
+                cout << "-------------------------------------------"<<endl;
                 cout << "\nConfiguración del Servidor DHCP:" << endl;
                 cout << "Interfaz: " << interfazLan << endl;
                 cout << "Rango de IPs: " << ipInicio << " - " << ipFinal << endl;
-                cout << "DNS: " << dns << endl;
+                cout << "DNS: " << dnsLan << endl;
                 cout << "Gateway: " << direccionIPlan << endl;
 
-                cout << "\n1) Iniciar servicio\n2) Volver\nSeleccione una opción: ";
+                cout << "\n1) Iniciar servicio\n2) Volver\nOpción: ";
                 int subOpcion;
                 cin >> subOpcion;
                 if (subOpcion == 1) {
                     editarArchivoInterfaces();
-                    editarArchivoDhcpdConf();
-                    iniciarServicioDhcp();
                 }
                 break;
             }
             case 4:
-                cout << "Saliendo del programa..." << endl;
+                system("clear");
                 return;
             default:
                 cout << "Opción no válida, intente nuevamente." << endl;
@@ -494,23 +555,21 @@ void menuDHCP() {
 void menuPrincipal() {
     int opcion;
 
-    while (true) {
-        //system("clear");
-        
+    while (true) {     
         if (!interfazLan.empty()) {
         cout << "-----------------------------" << endl;
         cout << "Interfaz para la red: " << interfazLan << endl;
-        cout << "IP: " << direccionIPlan << "/" << mascara <<endl;
+        cout << "IP: " << direccionIPlan << "/" << mascaraCIDRlan <<endl;
         }
-        cout << "---Menú Principal---"<< endl;
+        cout << "-------AUTO NET-------"<< endl;
         cout << "1) Interfaces de Red\n";
-        cout << "2) Programas y recursos\n";
+        cout << "2) Paquetes \n";
         cout << "3) Enrutamiento\n";
         cout << "4) Servicio DHCP\n";
         cout << "5) Salir\n";
-        cout << "Selecciona una opción: ";
+        cout << "Opción: ";
         cin >> opcion;
-        //system("clear");
+        system("clear");
         switch (opcion) {
             case 1:
                 submenuInterfaces();
@@ -519,13 +578,10 @@ void menuPrincipal() {
                 subMenu_Programas();
                 break;
             case 3:
-                configurarEnrutamiento();
+                submenuEnrutamiento();
                 break;
             case 4:
-                    // Calcular valores iniciales
-                   calcularMascaraCompleta();
-                   calcularIdentidadRed();
-                menuDHCP();
+                submenuDHCP();
                 break;
             case 5:
                 cout << "Saliendo...\n";
